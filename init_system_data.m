@@ -1,5 +1,5 @@
 function [mpc, gen_data, wind_data, storage_data] = init_system_data(case_name)
-% INIT_SYSTEM_DATA 初始化系统数据 (修复版 - 适配 PPSR 求解器)
+% INIT_SYSTEM_DATA 初始化系统数据 (适配 PPSR 求解器)
 % 自动修改拓扑和参数，并补充 T_crank/P_crank 字段
 
     fprintf('正在初始化 %s 系统数据...\n', case_name);
@@ -7,7 +7,7 @@ function [mpc, gen_data, wind_data, storage_data] = init_system_data(case_name)
     %% 1. 加载并预处理标准案例
     mpc = loadcase(case_name);
     
-    % IEEE 118 特殊处理：论文中节点 10 和 110 是黑启动风电场
+    % IEEE 118 特殊处理：点 10 和 110 是黑启动风电场
     if strcmp(case_name, 'case118')
         if ~ismember(10, mpc.gen(:,1))
             new_row = mpc.gen(1, :); new_row(1) = 10; new_row(9) = 100;
@@ -59,7 +59,7 @@ function [mpc, gen_data, wind_data, storage_data] = init_system_data(case_name)
     gen_data.Ramp = 0.04 * gen_data.Pg_max; 
     gen_data.Ramp(idx_BS) = 0.08 * gen_data.Pg_max(idx_BS); 
     
-    % --- 3.3 启动时间设置 (错落有致) ---
+    % --- 3.3 启动时间设置 ---
     gen_data.T_start_hot = zeros(num_gen, 1);
     gen_data.T_start_hot(idx_BS) = 0;
     gen_data.T_start_hot(idx_Wind) = 1;
@@ -68,9 +68,6 @@ function [mpc, gen_data, wind_data, storage_data] = init_system_data(case_name)
     for i = 1:length(idx_Thermal)
         gen_data.T_start_hot(idx_Thermal(i)) = mod(i, 5) + 2; 
     end
-
-    %% === [新增修复] 补充 PPSR 求解器所需的启动参数 ===
-    % 即使是标准案例，也需要定义这些字段，否则 solve_master_problem 会报错
     
     gen_data.P_crank = zeros(num_gen, 1);
     gen_data.T_crank = zeros(num_gen, 1);
@@ -107,4 +104,5 @@ function [mpc, gen_data, wind_data, storage_data] = init_system_data(case_name)
     
     fprintf('初始化完成: %d 台机组 (BS: %d, Wind: %d)\n', ...
         num_gen, length(idx_BS), length(idx_Wind));
+
 end
