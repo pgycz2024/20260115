@@ -1,12 +1,9 @@
-% Run_Rolling_Framework.m (适配 IEEE 118)
-
 clear; clc; close all;
 
 %% 1. 环境初始化
-case_name = 'case118'; % <--- 切换为 118 节点系统
+case_name = 'case118'; 
 [mpc, gen_data, wind_data, storage_data] = init_system_data(case_name);
-
-% 论文参数设置 
+ 
 T_horizon_opt = 7;  % 预测时域增加到 7
 T_total_sim = 40;   % 总仿真时长增加，因为系统更大
 
@@ -31,7 +28,6 @@ for k = 1:T_total_sim
     fprintf('\n>>> Step %d ... ', k);
     
     % 求解主问题
-    % 注意：118节点规模较大，Gurobi 可能需要几秒钟
     [sol_mp, status_mp] = solve_master_problem(mpc, gen_data, wind_data, storage_data, T_horizon_opt, k, current_u_on, current_Pg);
     
     if status_mp ~= 0
@@ -78,7 +74,6 @@ ylabel('总功率 (MW)');
 xlim([1, T_total_sim]);
 
 subplot(2,1,2);
-% 对于 118 节点，54 台机组会导致图例太长，所以不显示详细图例，只看堆叠效果
 area(1:T_total_sim, History.Pg_Detail');
 grid on;
 title('机组并网时序堆叠图', 'FontSize', 12);
@@ -87,4 +82,5 @@ ylabel('单机出力 (MW)');
 xlim([1, T_total_sim]);
 
 sgtitle('基于SHMPC的含规模新能源电网动态分区并行恢复过程演化图（case118）', ...
+
     'FontSize', 16, 'FontWeight', 'bold', 'Color', 'k');
