@@ -1,6 +1,4 @@
 function [mpc, gen_data, wind_data, storage_data, tie_lines_idx] = init_spain_like_118()
-% INIT_SPAIN_LIKE_118 (最终灾难版 - 修复变量顺序)
-% 新增输出: tie_lines_idx (连接南北区域的关键联络线索引)
 
     fprintf('正在构建虚拟西班牙电网 (含脆弱联络线模型)...\n');
     mpc = loadcase('case118');
@@ -44,7 +42,7 @@ function [mpc, gen_data, wind_data, storage_data, tie_lines_idx] = init_spain_li
     idx_Renew = [idx_PV; idx_Wind];
     gen_type(idx_Renew) = 3;
     
-    % (3) [关键修复] 在这里立刻定义火电机组索引，供后续参数设置使用
+    % (3) 定义火电机组索引，供后续参数设置使用
     idx_Thermal = find(gen_type == 1);
     
     %% 3. 机组参数设置 (融入 PPSR 启动特性)
@@ -53,7 +51,7 @@ function [mpc, gen_data, wind_data, storage_data, tie_lines_idx] = init_spain_li
     gen_data.Pg_max = mpc.gen(:, 9);
     gen_data.Pg_min = zeros(num_gen, 1);
     
-    % --- [新增] 启动特性参数 (源自 PPSR 思想) ---
+    % --- 启动特性参数 (源自 PPSR 思想) ---
     % 1. 启动功率 (P_crank)
     gen_data.P_crank = zeros(num_gen, 1);
     
@@ -81,6 +79,7 @@ function [mpc, gen_data, wind_data, storage_data, tie_lines_idx] = init_spain_li
     % --- 启动延迟 (指令发出到开始动作的时间) ---
     gen_data.T_start_hot = zeros(num_gen, 1);
     gen_data.T_start_hot(idx_Renew) = 1;
+    
     % 对火电机组随机分配延迟
     for i = 1:length(idx_Thermal)
         gen_data.T_start_hot(idx_Thermal(i)) = randi([3, 6]); 
@@ -117,4 +116,5 @@ function [mpc, gen_data, wind_data, storage_data, tie_lines_idx] = init_spain_li
     
     fprintf('初始化完成: %d 台机组 (BS: %d, Wind: %d, Thermal: %d)\n', ...
         num_gen, length(idx_BS), length(idx_Renew), length(idx_Thermal));
+
 end
