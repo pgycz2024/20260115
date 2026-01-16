@@ -1,11 +1,8 @@
-% Run_Real_Spain_Blackout.m
-% 课程大作业: 复现 4.28 西班牙大停电真实演化过程
+% 复现 4.28 西班牙大停电真实演化过程
 % 特性: 连锁脱网 -> 联络线解列 -> 启动倒送电冲击
-
 clear; clc; close all;
 
 %% 1. 初始化系统 (高比例新能源, 脆弱性参数)
-% 使用你之前修复过 bug 的版本
 [mpc_base, gen_data, wind_data, storage_data, tie_lines_idx] = init_spain_like_118();
 
 T_total = 35;
@@ -54,13 +51,12 @@ ylabel('系统有效总出力 (MW)');
 text(15, mean(History_Static.P_total(15:end)) - 1000, '静态策略: 资源被锁死，无法互救', 'Color', 'r', 'FontSize', 10);
 text(15, mean(History_Dynamic.P_total(15:end)), '动态策略: 重构边界，幸存资源最大化利用', 'Color', 'b', 'FontSize', 10);
 % 
-% % 第一行：蓝色文字（原内容）
+% % 第一行：蓝色文字
 % y_pos = mean(History_Dynamic.P_total(15:end)); % 计算基准高度
 % text(15, y_pos, '动态策略: 重构边界，幸存资源最大化利用', ...
 %     'Color', 'b', 'FontSize', 10, 'VerticalAlignment', 'bottom'); 
 % 
-% % 第二行：红色文字（另起一行）
-% % 通过减去一个数值（如 100，根据您的功率量级调整）来实现向下换行
+% % 第二行：红色文字
 % text(15, y_pos - 100, '静态策略: 资源被锁死，无法互救', ...
 %     'Color', 'r', 'FontSize', 10, 'VerticalAlignment', 'top');
 
@@ -71,7 +67,7 @@ xline(12, 'w--', 'LineWidth', 2);
 grid on;
 title('动态策略: 灾后资源重组与启动响应', 'FontSize', 12);
 ylabel('单机出力 (MW)'); xlabel('时间步 (Step)');
-ylim([-500, max(History_Dynamic.P_total)*1.2]); % 留出负轴给倒送电
+ylim([-500, max(History_Dynamic.P_total)*1.2]); 
 
 sgtitle('基于动态分区的并行恢复策略在西班牙大停电事故中的模拟应用及对比', ...
     'FontSize', 16, 'FontWeight', 'bold', 'Color', 'k');
@@ -155,10 +151,8 @@ function Hist = run_real_disaster_sim(mpc, gen_data, wind_data, storage_data, ti
             end
             
             % 如果是静态模式，且发生了灾难，强制加上惩罚
-            % (因为静态分区可能无法满足连通性，导致实际出力发不出来)
             if is_static && k >= 12
                 % 模拟: 虽然算出来了 P，但因为孤岛效应，实际发不出来
-                % 简单打个折
                 action_P = action_P * 0.7; 
             end
         end
@@ -184,4 +178,5 @@ function Hist = run_real_disaster_sim(mpc, gen_data, wind_data, storage_data, ti
         if mod(k, 5) == 0, fprintf('\n'); end
     end
     fprintf('最终出力: %.1f MW\n', sum(current_Pg));
+
 end
