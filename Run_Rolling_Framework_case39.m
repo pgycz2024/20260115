@@ -1,10 +1,6 @@
-% Run_Rolling_Framework.m
-% 复现论文 SHMPC 滚动时域恢复过程 (最终完美阶梯版)
-
 clear; clc; close all;
 
 %% 1. 环境初始化
-% 使用你刚才带有错落启动时间(mod i,3)的那个版本
 [mpc, gen_data, wind_data, storage_data] = init_system_data('case39');
 
 T_total_sim = 20;   % 总仿真时长
@@ -49,8 +45,7 @@ for k = 1:T_total_sim
     current_u_on = min(1, current_u_on + action_u_start);
     current_Pg = action_P_g;
     
-    % --- [核心修复] 更新 gen_data 的倒计时 ---
-    % 只有对于还没启动的机组，我们才减少它的等待时间
+    % --- 更新 gen_data 的倒计时 ---
     % 如果 T_start_hot > 0，就减 1，直到为 0
     not_started_idx = find(current_u_on == 0);
     gen_data.T_start_hot(not_started_idx) = max(0, gen_data.T_start_hot(not_started_idx) - 1);
@@ -60,7 +55,6 @@ for k = 1:T_total_sim
     History.P_gen_total = [History.P_gen_total; total_power];
     History.Pg_Detail = [History.Pg_Detail, action_P_g];
     
-    % 打印简报
     started_gens = find(action_u_start == 1);
     if ~isempty(started_gens)
         fprintf('[★启动机组: %s] ', mat2str(started_gens'));
@@ -100,4 +94,5 @@ for i=1:size(mpc.gen,1)
         legend_str{end+1} = sprintf('Gen %d', i);
     end
 end
+
 legend(legend_str, 'Location', 'eastoutside', 'FontSize', 8);
