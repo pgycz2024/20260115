@@ -1,5 +1,4 @@
 function [sol, status] = solve_master_problem(mpc, gen_data, wind_data, storage_data, T_horizon, current_step, current_u_on, initial_Pg, fixed_x_gm)
-% SOLVE_MASTER_PROBLEM_V2 (融合 PPSR 增强版)
 % 特性 1: 引入 SCF 约束(基于虚拟流的连通性约束) ，确保动态分区的物理连通性
 % 特性 2: 引入 Cranking Power，模拟启动冲击
 
@@ -40,14 +39,14 @@ function [sol, status] = solve_master_problem(mpc, gen_data, wind_data, storage_
     P_net = sdpvar(ng, T_horizon, 'full');  % 实际注入电网的功率 (+/-)
     P_gen = sdpvar(ng, T_horizon, 'full');  % 发电机发出的正功率
     
-    % 2.3 辅助变量 (灵活性)
+    % 2.3 辅助变量
     R_sync = sdpvar(length(idx_sync), n_bs, T_horizon, 'full');
     n_stor = length(storage_data.idx);
     x_bm = binvar(n_stor, n_bs, 'full');    % 储能分区归属
     R_bess = sdpvar(n_stor, n_bs, T_horizon, 'full');
     Slack_Flex = sdpvar(n_bs, T_horizon, 'full'); % 灵活性缺额松弛
     
-    % 2.4 [新增] 连通性变量 (借鉴 PPSR)
+    % 2.4 连通性变量
     % y_line_m: 线路 l 是否属于分区 m
     y_line_m = binvar(nl, n_bs, 'full'); 
     % f_line_m: 分区 m 内的虚拟流 (用于校验连通性)
@@ -77,7 +76,7 @@ function [sol, status] = solve_master_problem(mpc, gen_data, wind_data, storage_
         end
     end
 
-    % --- 3.2 [增强] 物理出力与启动倒送电 (Cranking Power) ---
+    % --- 3.2 物理出力与启动倒送电 (Cranking Power) ---
     for g = 1:ng
         T_crank = gen_data.T_crank(g);
         P_crank_val = gen_data.P_crank(g);
@@ -85,10 +84,6 @@ function [sol, status] = solve_master_problem(mpc, gen_data, wind_data, storage_
         for t = 1:T_horizon
             % 核心逻辑: P_net = P_gen - P_consumption
             % 如果处在启动初期 (u_on=1 但刚启动不久)，P_gen=0, P_consumption=P_crank
-            
-            % 简化判断：我们很难在线性模型里精确判断"刚启动了多久"
-            % 这里使用一个近似技巧：如果是本时段启动 (u_start=1)，则强制为负
-            % (为了简化计算，假设 T_crank 主要影响启动的那一刻，或者稍微放宽)
             
             if T_crank > 0
                 % 如果 t 时刻启动，则 P_net 必须等于 -P_crank
@@ -118,9 +113,7 @@ function [sol, status] = solve_master_problem(mpc, gen_data, wind_data, storage_
         end
     end
 
-    % --- 3.3 [新增] 动态连通性约束 (PPSR 核心) ---
-    % 仅对 t=1 时刻的拓扑进行严格约束 (为了减少计算量，假设拓扑在预测时域内保持稳定)
-    
+    % --- 3.3 动态连通性约束 (PPSR核心) ---    
     % (1) 节点-分区 映射
     Constraints = [Constraints, sum(x_bus_m, 2) == 1]; % 每个节点属于一个分区
     
@@ -130,8 +123,6 @@ function [sol, status] = solve_master_problem(mpc, gen_data, wind_data, storage_
         % 机组分区 x_gm 必须等于 节点分区 x_bus_m
         if is_static_mode
              Constraints = [Constraints, x_gm(g, :) == fixed_x_gm(g, :)];
-             % 在静态模式下，节点分区也被锁定 (需要传入，这里简化为重新推导或假设一致)
-             % 简单起见，静态模式让求解器自己去找符合 fixed_x_gm 的 x_bus_m
         else
              Constraints = [Constraints, x_gm(g, :) == x_bus_m(bus_idx, :)];
         end
@@ -141,7 +132,6 @@ function [sol, status] = solve_master_problem(mpc, gen_data, wind_data, storage_
     % 使用 Big-M 逻辑: y_line_m(l, k) <= x_bus_m(from, k), y_line_m(l, k) <= x_bus_m(to, k)
     idx_from = mpc.branch(:, 1); % 这里需要转成内部索引，假设 mpc.bus 顺序对应 1..nb
     idx_to   = mpc.branch(:, 2); 
-    % 修正：MATPOWER 的 branch 列存的是 Bus ID，需要映射到 1..nb 索引
     [~, idx_from_map] = ismember(idx_from, mpc.bus(:,1));
     [~, idx_to_map]   = ismember(idx_to, mpc.bus(:,1));
     
@@ -150,24 +140,15 @@ function [sol, status] = solve_master_problem(mpc, gen_data, wind_data, storage_
         Constraints = [Constraints, y_line_m(:, m) <= x_bus_m(idx_from_map, m)];
         Constraints = [Constraints, y_line_m(:, m) <= x_bus_m(idx_to_map, m)];
         
-        % (4) 单商品流约束 (Single Commodity Flow)
+        % (4) 基于虚拟流的连通性约束
         % 构建节点关联矩阵 A (nb x nl)
-        % 注意：这里要在循环内动态构建流平衡，比较耗时。
-        % 既然是 118 节点，我们手写稀疏形式会快一点。
-        
         % 注入: 除了 Root 节点(BS)，其他节点必须消耗 1 单位虚拟流
         % Root 节点提供 sum(x_bus_m without root) 的流
-        % 简单写法： A * f_line_m(:, m) == Demand_Flow
-        
-        % 流守恒: Sum(f_in) - Sum(f_out) = -x_bus_m (如果是负荷节点)
-        % 对应 Root 节点，源源不断流出。
-        
         root_bus_id = mpc.gen(idx_bs(m), 1);
         [~, root_idx] = ismember(root_bus_id, mpc.bus(:,1));
         
         % 虚拟流生成：除 Root 外，每个属于该分区的节点消耗 1
         % Node_Flow_Balance = A * f
-        % 这种写法在 YALMIP 里略复杂，我们用最简化的"生成树"约束：
         
         % 仅当线路开启时允许流
         Constraints = [Constraints, f_line_m(:, m) >= -nb * y_line_m(:, m)];
@@ -186,12 +167,6 @@ function [sol, status] = solve_master_problem(mpc, gen_data, wind_data, storage_
         root_bus_id = mpc.gen(idx_bs(m), 1);
         [~, root_idx] = ismember(root_bus_id, mpc.bus(:,1));
         
-        % 节点注入向量: 非根节点如果是该分区的，注入为 -1 (消耗)
-        % 根节点注入为: sum(x_bus_m(others, m))
-        % 这会让约束变非线性。
-        
-        % === 替代方案：基于连通性的松弛 ===
-        % 为了避免 MILP 过重，我们只约束：
         % 如果节点在分区 m，且不是 root，则流入量 - 流出量 = 1
         % 如果不在分区 m，则平衡为 0
         
@@ -210,14 +185,13 @@ function [sol, status] = solve_master_problem(mpc, gen_data, wind_data, storage_
         % 这样就强制了所有属于 m 的节点必须通过线路连接到 root
     end
 
-    % --- 3.4 灵活性与供需平衡 (保留原有优势) ---
-    % ... (此处代码与之前版本基本一致，主要把 P_g 换成 P_net) ...
+    % --- 3.4 灵活性与供需平衡 ---
     % 同步机灵活性
     for i = 1:length(idx_sync)
         g_idx = idx_sync(i);
         P_max_val = gen_data.Pg_max(g_idx);
         for t = 1:T_horizon
-            % R <= P_max - P_net (简化处理，忽略爬坡对备用的限制)
+            % R <= P_max - P_net 
             Constraints = [Constraints, sum(R_sync(i, :, t)) <= P_max_val * u_on(g_idx, t) - P_net(g_idx, t)];
             for m = 1:n_bs
                 Constraints = [Constraints, R_sync(i, m, t) >= 0];
@@ -259,7 +233,7 @@ function [sol, status] = solve_master_problem(mpc, gen_data, wind_data, storage_
     end
     Obj_Penalty = sum(sum(Slack_Flex)) * 1e5;
     
-    % [新增] 连通性惩罚 (最小化使用的线路数，倾向于紧凑分区)
+    % 连通性惩罚 (最小化使用的线路数，倾向于紧凑分区)
     Obj_Topology = sum(sum(sum(y_line_m))) * 0.1; 
     
     Objective = -Obj_Power + Obj_Penalty + Obj_Topology; 
@@ -278,4 +252,5 @@ function [sol, status] = solve_master_problem(mpc, gen_data, wind_data, storage_
     else
         sol.x_gm = [];
     end
+
 end
